@@ -1,6 +1,5 @@
 # =============================================================================
-# CÓDIGO MAESTRO FINAL Y DEFINITIVO - NO MODIFICAR
-# Contiene todas las funcionalidades y correcciones.
+# CÓDIGO MAESTRO FINAL Y ABSOLUTO - TODAS LAS FUNCIONALIDADES INTEGRADAS
 # =============================================================================
 
 import streamlit as st
@@ -15,24 +14,18 @@ import investpy
 # --- 1. CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Plataforma de Trading", page_icon="🏦", layout="wide")
 
-# --- 2. IMPLEMENTACIÓN DE SEGURIDAD (CONTRASEÑA) ---
+# --- 2. IMPLEMENTACIÓN DE SEGURIDAD ---
 def check_password():
-    if st.session_state.get("password_correct", False):
-        return True
-
+    if st.session_state.get("password_correct", False): return True
     st.title("Plataforma de Inversión")
     st.write("Por favor, introduce la contraseña para acceder.")
     password_input = st.text_input("Contraseña", type="password", key="password_input_widget")
-    
     if st.button("Acceder"):
-        # Usa st.secrets.get() para evitar errores si el secreto no está definido
         if password_input and password_input == st.secrets.get("password", ""):
             st.session_state["password_correct"] = True
-            st.rerun()  # Forzar recarga para mostrar la app
+            st.rerun()
         else:
             st.error("😕 Contraseña incorrecta.")
-            st.session_state["password_correct"] = False
-    
     return False
 
 # --- 3. LA APLICACIÓN COMPLETA SOLO SE EJECUTA SI LA CONTRASEÑA ES CORRECTA ---
@@ -52,24 +45,22 @@ if check_password():
     def guardar_transacciones(df):
         df.to_csv("transacciones.csv", index=False)
 
-    @st.cache_data(ttl=86400) # Cache de 1 día para la lista de tickers
+    @st.cache_data(ttl=86400)
     def cargar_lista_tickers_web():
         try:
             stocks_mx = investpy.get_stocks(country='mexico')[['symbol', 'name']]
             stocks_mx.columns = ['User_Ticker', 'Name']
             stocks_mx['API_Ticker'] = stocks_mx['User_Ticker'] + '.MX'
             stocks_mx['Market'] = 'BMV'
-            
             stocks_us = investpy.get_stocks(country='united states')[['symbol', 'name']]
             stocks_us.columns = ['User_Ticker', 'Name']
             stocks_us['API_Ticker'] = stocks_us['User_Ticker']
             stocks_us['Market'] = 'SIC'
-
             df = pd.concat([stocks_mx, stocks_us], ignore_index=True).dropna().drop_duplicates(subset=['User_Ticker'])
             df['Display'] = df['Name'] + " (" + df['User_Ticker'] + ") - " + df['Market']
             return df
         except Exception as e:
-            raise RuntimeError(f"No se pudo descargar la lista de tickers: {e}. Revisa tu conexión a internet o intenta de nuevo más tarde.")
+            raise RuntimeError(f"No se pudo descargar la lista de tickers: {e}.")
 
     @st.cache_data(ttl=3600)
     def get_stock_info_cached(api_ticker):
@@ -91,13 +82,21 @@ if check_password():
         fig.update_layout(title_text=f'Gráfica de {api_ticker}', template='plotly_dark', xaxis_rangeslider_visible=False)
         return fig
 
+    def format_large_number(num):
+        if num is None or not isinstance(num, (int, float)): return "N/A"
+        if num > 1_000_000_000_000: return f"{num / 1_000_000_000_000:.2f} T"
+        if num > 1_000_000_000: return f"{num / 1_000_000_000:.2f} B"
+        if num > 1_000_000: return f"{num / 1_000_000:.2f} M"
+        return f"{num:,.2f}"
+
     # --- INICIALIZACIÓN DE ESTADO Y DATOS ---
     if 'transactions' not in st.session_state: st.session_state.transactions = cargar_transacciones()
     if 'page' not in st.session_state: st.session_state.page = 'Portafolio'
+    if 'ticker_to_trade' not in st.session_state: st.session_state.ticker_to_trade = None
     
     lista_tickers_df = None
     try:
-        with st.spinner("Actualizando lista de tickers del mercado... (puede tardar un momento la primera vez)"):
+        with st.spinner("Actualizando lista de tickers del mercado..."):
             lista_tickers_df = cargar_lista_tickers_web()
     except Exception as e:
         st.error(e)
@@ -114,7 +113,7 @@ if check_password():
             if st.session_state.transactions.empty:
                 st.info("Bienvenido. Agrega una transacción en la página 'Operar'.")
             else:
-                portfolio_df = pd.DataFrame() # Definir dataframe vacío
+                portfolio_df = pd.DataFrame()
                 df_trades = st.session_state.transactions[st.session_state.transactions['Tipo'].isin(['Compra', 'Venta'])]
                 portfolio = {}
                 if not df_trades.empty:
@@ -125,25 +124,27 @@ if check_password():
                             compras = df_ticker[df_ticker['Tipo']=='Compra']
                             if compras['Cantidad'].sum() > 0:
                                 avg_cost = (compras['Cantidad'] * compras['Precio']).sum() / compras['Cantidad'].sum()
-                                portfolio[ticker] = {'Cantidad': qty, 'Costo Total': qty * avg_cost}
+                                portfolio[ticker] = {'Cantidad': qty, 'Costo Total': qty * avg_cost, 'Precio Promedio Compra': avg_cost}
                 
                 if portfolio:
                     portfolio_df = pd.DataFrame.from_dict(portfolio, orient='index').reset_index().rename(columns={'index': 'API_Ticker'})
                     def get_best_price(t): info = get_stock_info_cached(t); return info.get('currentPrice', info.get('previousClose', 0)) or 0
                     portfolio_df['Precio Actual'] = portfolio_df['API_Ticker'].apply(get_best_price)
                     portfolio_df['Valor de Mercado'] = portfolio_df['Cantidad'] * portfolio_df['Precio Actual']
-                    if lista_tickers_df is not None:
-                        portfolio_df = pd.merge(portfolio_df, lista_tickers_df[['API_Ticker', 'Market']], on='API_Ticker', how='left')
-                    portfolio_df['Market'] = portfolio_df['Market'].fillna('Desconocido')
-                    def get_sector(t): return get_stock_info_cached(t).get('sector', 'No Clasificado')
-                    portfolio_df['Sector'] = portfolio_df['API_Ticker'].apply(get_sector)
+                    portfolio_df['Ganancia/Pérdida ($)'] = portfolio_df['Valor de Mercado'] - portfolio_df['Costo Total']
+                    portfolio_df['Ganancia/Pérdida (%)'] = (portfolio_df['Ganancia/Pérdida ($)'] / portfolio_df['Costo Total']).replace([float('inf'), -float('inf')], 0) * 100
+                    
+                    st.subheader("Resumen General")
+                    total_market_value, total_cost_basis = portfolio_df['Valor de Mercado'].sum(), portfolio_df['Costo Total'].sum()
+                    total_gain_loss = total_market_value - total_cost_basis
+                    total_return_pct = (total_gain_loss / total_cost_basis) * 100 if total_cost_basis > 0 else 0
+                    c1,c2,c3 = st.columns(3); c1.metric("Valor del Portafolio",f"${total_market_value:,.2f}"); c2.metric("Inversión Total",f"${total_cost_basis:,.2f}"); c3.metric("Utilidad Neta Total",f"${total_gain_loss:,.2f}",f"{total_return_pct:.2f}%")
 
-                    total_value = portfolio_df['Valor de Mercado'].sum()
-                    if total_value > 0:
-                        st.subheader("Análisis de Diversificación")
-                        c1, c2 = st.columns(2)
-                        with c1: st.plotly_chart(px.pie(portfolio_df, values='Valor de Mercado', names='Market', title='Asignación por Mercado'), use_container_width=True)
-                        with c2: st.plotly_chart(px.pie(portfolio_df, values='Valor de Mercado', names='Sector', title='Asignación por Sector'), use_container_width=True)
+                    st.subheader("Ganancia y Pérdida por Activo")
+                    portfolio_df_sorted = portfolio_df.sort_values('Ganancia/Pérdida ($)')
+                    portfolio_df_sorted['Color'] = ['Ganancia' if g >= 0 else 'Pérdida' for g in portfolio_df_sorted['Ganancia/Pérdida ($)']]
+                    fig_gpl = px.bar(portfolio_df_sorted, x='Ganancia/Pérdida ($)', y='API_Ticker', orientation='h', color='Color', color_discrete_map={'Ganancia':'green', 'Pérdida':'red'})
+                    st.plotly_chart(fig_gpl, use_container_width=True)
                     
                     st.subheader("Detalle de Posiciones"); st.dataframe(portfolio_df, use_container_width=True)
                 else:
@@ -158,7 +159,6 @@ if check_password():
             if lista_tickers_df is None:
                 st.error("La lista de tickers no está disponible. No se puede operar.")
             else:
-                if 'ticker_to_trade' not in st.session_state: st.session_state.ticker_to_trade = None
                 opcion = st.selectbox("Busca un activo para operar", options=lista_tickers_df['Display'], index=None, placeholder="Escribe para buscar...")
                 if opcion:
                     fila = lista_tickers_df[lista_tickers_df['Display'] == opcion]
@@ -166,7 +166,6 @@ if check_password():
                 
                 if st.session_state.ticker_to_trade:
                     api_ticker, user_ticker = st.session_state.ticker_to_trade['api'], st.session_state.ticker_to_trade['user']
-                    st.write("---")
                     col_chart, col_form = st.columns([3, 1])
                     with col_chart:
                         st.subheader(f"Gráfica de {user_ticker}")
@@ -192,16 +191,32 @@ if check_password():
 
     # --- PÁGINA 3: EXPLORADOR ---
     elif st.session_state.page == 'Explorador':
-        st.header("Explorador de Acciones")
+        st.header("Explorador de Activos")
         try:
             if lista_tickers_df is not None:
-                opcion_exp = st.selectbox("Selecciona una acción para explorar", options=lista_tickers_df['Display'], index=None, key="exp_select")
+                opcion_exp = st.selectbox("Selecciona una acción para analizar", options=lista_tickers_df['Display'], index=None, placeholder="Escribe para buscar...")
                 if opcion_exp:
                     fila_exp = lista_tickers_df[lista_tickers_df['Display'] == opcion_exp]
                     if not fila_exp.empty:
-                        api_ticker_exp, user_ticker_exp = fila_exp['API_Ticker'].iloc[0], fila_exp['User_Ticker'].iloc[0]
-                        with st.spinner(f"Cargando {user_ticker_exp}..."): info = get_stock_info_cached(api_ticker_exp)
-                        if info: st.json(info)
+                        api_ticker_exp = fila_exp['API_Ticker'].iloc[0]
+                        with st.spinner(f"Cargando datos para {api_ticker_exp}..."): info = get_stock_info_cached(api_ticker_exp)
+                        if info:
+                            st.subheader(f"{info.get('longName', api_ticker_exp)}")
+                            st.write(f"**{info.get('symbol', '')}** | {info.get('sector', 'N/A')} | {info.get('industry', 'N/A')}")
+                            with st.expander("Resumen del Negocio"): st.write(info.get('longBusinessSummary', 'No hay resumen.'))
+                            st.subheader("Métricas de Mercado")
+                            c1, c2, c3, c4 = st.columns(4)
+                            c1.metric("Precio Actual", f"${info.get('currentPrice', 0):,.2f}"); c2.metric("Capitalización", format_large_number(info.get('marketCap'))); c3.metric("Volumen", format_large_number(info.get('volume'))); c4.metric("Ratio P/E", f"{info.get('trailingPE', 0):,.2f}")
+                            st.subheader("Análisis de Ratios Financieros")
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                valuation_metrics = {'P/E': info.get('trailingPE'), 'Precio/Ventas': info.get('priceToSalesTrailing12Months'), 'Precio/Libro': info.get('priceToBook'), 'Empresa/EBITDA': info.get('enterpriseToEbitda')}
+                                if valuation_metrics := {k: v for k, v in valuation_metrics.items() if v is not None}:
+                                    st.plotly_chart(px.bar(pd.DataFrame(list(valuation_metrics.items()), columns=['Métrica', 'Valor']), x='Valor', y='Métrica', orientation='h', title='Ratios de Valuación'), use_container_width=True)
+                            with col2:
+                                profitability_metrics = {'Margen Neto (%)': (info.get('profitMargins') or 0)*100, 'ROA (%)': (info.get('returnOnAssets') or 0)*100, 'ROE (%)': (info.get('returnOnEquity') or 0)*100}
+                                if profitability_metrics := {k: v for k, v in profitability_metrics.items() if v is not None}:
+                                    st.plotly_chart(px.bar(pd.DataFrame(list(profitability_metrics.items()), columns=['Métrica', 'Valor']), x='Valor', y='Métrica', orientation='h', title='Ratios de Rentabilidad'), use_container_width=True)
                         else: st.error(f"No se pudo obtener información para {api_ticker_exp}.")
             else:
                 st.error("No se pudo cargar la lista de tickers.")
@@ -212,32 +227,21 @@ if check_password():
     elif st.session_state.page == 'Noticias':
         st.header("Últimas Noticias de tus Inversiones")
         try:
-            if st.session_state.transactions.empty:
-                st.info("Aún no tienes posiciones abiertas para mostrar noticias.")
+            if st.session_state.transactions.empty: st.info("Aún no tienes posiciones para mostrar noticias.")
             else:
-                # Re-calculamos el portafolio aquí para obtener los tickers actuales
-                df_trades = st.session_state.transactions[st.session_state.transactions['Tipo'].isin(['Compra', 'Venta'])]
-                portfolio_tickers = []
-                if not df_trades.empty:
-                    for ticker in df_trades['Ticker'].unique():
-                        qty = df_trades[df_trades['Ticker']==ticker]['Cantidad'].sum()
-                        if qty > 1e-6: portfolio_tickers.append(ticker)
-                
-                if portfolio_tickers:
-                    with st.spinner("Buscando noticias..."):
-                        all_news, seen_links = [], set()
-                        for ticker in portfolio_tickers:
-                            try:
-                                news = yf.Ticker(ticker).news
-                                for article in news:
-                                    if 'link' in article and article['link'] not in seen_links:
-                                        all_news.append(article); seen_links.add(article['link'])
-                            except: pass
-                        all_news.sort(key=lambda x: x.get('providerPublishTime', 0), reverse=True)
-                        if all_news:
-                            for article in all_news[:20]: st.markdown(f"**[{article.get('title')}]({article.get('link')})** - *{article.get('publisher')}*")
-                        else: st.info("No se encontraron noticias recientes para tu portafolio.")
-                else:
-                    st.info("Aún no tienes posiciones abiertas para mostrar noticias.")
+                tickers_en_portafolio = st.session_state.transactions['Ticker'].unique().tolist()
+                with st.spinner("Buscando noticias..."):
+                    all_news, seen_links = [], set()
+                    for ticker in tickers_en_portafolio:
+                        try:
+                            news = yf.Ticker(ticker).news
+                            for article in news:
+                                if 'link' in article and article['link'] not in seen_links:
+                                    all_news.append(article); seen_links.add(article['link'])
+                        except: pass
+                    all_news.sort(key=lambda x: x.get('providerPublishTime', 0), reverse=True)
+                    if all_news:
+                        for article in all_news[:20]: st.markdown(f"**[{article.get('title')}]({article.get('link')})** - *{article.get('publisher')}*")
+                    else: st.info("No se encontraron noticias recientes para tu portafolio.")
         except Exception as e:
             st.error("Ocurrió un error en la página 'Noticias'."); st.exception(e)
