@@ -207,7 +207,7 @@ with tab3:
             else:
                 st.write("No se encontraron noticias recientes para este ticker.")
         except Exception as e:
-            st.error(f"No se pudo obtener la información para {ticker_a_explorar}. Verifica el ticker o tu conexión. Error: {e}")import streamlit as st
+            st.error(f"No se pudo obtener la información para {ticker_a_explorar}. Verifica el ticker o tu conexión. Error: {e}")
 import pandas as pd
 import yfinance as yf
 import plotly.express as px
