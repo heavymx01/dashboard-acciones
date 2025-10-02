@@ -258,23 +258,6 @@ lista_tickers_df = cargar_lista_tickers_gbm()
 # --- BARRA LATERAL (SIDEBAR) ---
 with st.sidebar:
     st.header("Registrar Movimiento")
-    with st.form("transaction_form", clear_on_submit=True):
-        # ... (Formulario de registro igual que antes, usando la nueva lista de tickers)
-        transaction_type = st.selectbox("Tipo de Movimiento", ["Compra", "Venta", "Dividendo"])
-        ticker_seleccionado = None
-        if lista_tickers_df is not None:
-            opcion = st.selectbox("Buscar Acción (BMV/SIC)", options=lista_tickers_df['Display'], index=None, placeholder="Escribe para buscar...")
-            if opcion:
-                ticker_seleccionado = opcion.split('(')[1].split(')')[0]
-        else:
-            ticker_seleccionado = st.text_input("Ticker").upper()
-
-        if transaction_type in ["Compra", "Venta"]:
-            quantity = st.number_input("Cantidad", min_value=0.01, format="%.4f")
-            price = st.number_input("Precio", min_value=0.01, format="%.4f")
-        else: # Dividendo
-            quantity = 0
-            price = st.number_input("Monto Total Dividendo", min_value=0.01, format="%.2f")
 
         date = st.date_input("Fecha", datetime.now())
         submitted = st.form_submit_button("Agregar Movimiento")
